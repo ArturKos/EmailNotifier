@@ -1,0 +1,3 @@
+#!/bin/bash
+#g++ b64decode.cpp -o b64decode && ./b64decode
+gcc notifier.c -o notifier -lncurses && ./notifier poczta.o2.pl popbox popbox
