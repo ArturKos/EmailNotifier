@@ -1,0 +1,12 @@
+build/
+cmake-build-*/
+docs/build/
+
+# Runtime state written by the notifier.
+known_uids.txt
+pending_uids.txt
+
+# Editor/IDE
+.vscode/
+.idea/
+*.swp
