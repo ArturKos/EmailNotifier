@@ -1,112 +1,116 @@
 # EmailNotifier
 
-A terminal-based **POP3 email notifier** written in C that polls a mail server every 60 seconds over raw BSD sockets, tracks message UIDs to detect new arrivals, and displays status through an ncurses interface.
+A terminal **POP3 new-mail notifier** written in C. It polls a mailbox every 60 seconds over raw BSD sockets, tracks message UIDs to detect genuinely new arrivals, and displays status through an ncurses interface.
 
-![C](https://img.shields.io/badge/C-99-A8B9CC?logo=c)
+![C](https://img.shields.io/badge/C-11-A8B9CC?logo=c)
+![CMake](https://img.shields.io/badge/build-CMake-064F8C?logo=cmake)
+![GoogleTest](https://img.shields.io/badge/tests-GoogleTest-4285F4)
+![Doxygen](https://img.shields.io/badge/docs-Doxygen-2C4AA8)
 ![Linux](https://img.shields.io/badge/Linux-BSD_Sockets-FCC624?logo=linux)
-![ncurses](https://img.shields.io/badge/ncurses-Terminal_UI-4E9A06)
-![POP3](https://img.shields.io/badge/POP3-Port_110-005AF0)
 
-## Features
+## Highlights
 
-- **Raw POP3 protocol implementation** -- USER, PASS, UIDL, QUIT, and NOP commands sent over TCP sockets without external mail libraries
-- **UIDL-based new mail detection** -- unique message IDs are stored locally and compared on each poll to identify only genuinely new messages
-- **60-second polling interval** with non-blocking keyboard input so the user can exit at any time
-- **ncurses terminal UI** with automatic screen clearing, status messages, and new mail count display
-- **Persistent UID database** -- message IDs are saved to `baza.uidl` and updated atomically (write to `baza.uidlnew`, then rename) to survive restarts
-- **DNS resolution** via `gethostbyname()` for server address lookup
-
-## Dependencies
-
-| Component | Version | Purpose |
-|-----------|---------|---------|
-| GCC | any | C compiler |
-| ncurses (libncurses) | any | Terminal UI rendering |
-| POSIX / Linux | any | BSD sockets, DNS resolution, `sleep()` |
-
-### Installing dependencies (Ubuntu / Debian)
-
-```bash
-sudo apt-get install gcc libncurses5-dev
-```
-
-### Installing dependencies (Arch Linux)
-
-```bash
-sudo pacman -S gcc ncurses
-```
+- **Raw POP3 protocol** (`USER`, `PASS`, `UIDL`, `NOOP`, `QUIT`) over TCP - no external mail library.
+- **Clean separation of concerns**: protocol (`pop3_client`), persistence/diff (`uidl_store`), and UI (`main`) live in distinct translation units, each with a narrow public API.
+- **Safe string handling**: all buffer writes use sized `snprintf` - no `strcat` overflow risk.
+- **Modern DNS**: uses `getaddrinfo()` (IPv4-capable, thread-safe) rather than deprecated `gethostbyname()`.
+- **Unit + integration tests** with GoogleTest. Network tests spin up a scripted mock POP3 server on an ephemeral loopback port - no real servers, no flakiness.
+- **Doxygen-documented public headers**; HTML docs built via `cmake --build build --target docs`.
 
 ## Building
 
-```bash
-gcc notifier.c -o notifier -lncurses
-```
-
-## Usage
+Requires GCC or Clang, CMake ≥ 3.14, ncurses development headers, and (for docs) Doxygen. Network access is needed on the first build so CMake can fetch GoogleTest.
 
 ```bash
-./notifier <pop3_server> <username> <password>
+# Ubuntu / Debian
+sudo apt-get install build-essential cmake libncurses-dev doxygen
+
+# Arch
+sudo pacman -S base-devel cmake ncurses doxygen
 ```
 
-| Argument | Description |
-|----------|-------------|
-| `pop3_server` | Hostname or IP of the POP3 mail server |
-| `username` | POP3 account username |
-| `password` | POP3 account password |
-
-### Example
+Build the executable and tests:
 
 ```bash
-./notifier pop3.example.com myuser mypassword
+cmake -S . -B build
+cmake --build build -j
 ```
 
-The notifier will:
+## Running
 
-1. Connect to the POP3 server on port 110.
-2. Authenticate with the provided credentials.
-3. Retrieve the UIDL list and compare against the local database.
-4. Display the count of new messages (or "No new messages").
-5. Log out, close the connection, and sleep for 60 seconds before repeating.
-6. Press any key to exit.
-
-## How It Works
-
-```
-  [init()]         -- resolve hostname, create TCP socket, connect to port 110
-      |
-      v
-  [logowanie()]    -- send USER + PASS commands, verify +OK responses
-      |
-      v
-  [GetUIDL()]      -- send UIDL command, parse response into baza.uidlnew
-      |
-      v
-  [CompareFiles()] -- diff baza.uidl vs baza.uidlnew, count new UIDs
-      |
-      v
-  New mail? -----> rename baza.uidlnew to baza.uidl (atomic update)
-      |
-      v
-  [wyloguj()]      -- send QUIT command
-      |
-      v
-  [finito()]       -- close socket
-      |
-      v
-  sleep(60)        -- wait, then repeat (non-blocking key check for exit)
+```bash
+./build/notifier <pop3_server> <username> <password>
 ```
 
-## Project Structure
+Example:
+
+```bash
+./build/notifier pop3.example.com alice hunter2
+```
+
+The notifier connects, authenticates, fetches the UIDL list, compares it against `known_uids.txt` in the working directory, and prints the count of new messages. It repeats every 60 seconds. Press any key to exit.
+
+> **Security note:** POP3 on port 110 is **cleartext** - credentials are sent in the clear. This codebase is intended for trusted networks (home LAN, education) only. Do not point it at a production mailbox over the public internet without an encrypted tunnel.
+
+## Testing
+
+```bash
+ctest --test-dir build --output-on-failure
+```
+
+Tests cover:
+
+- **`uidl_store`** - UIDL response parsing, new-ID counting, atomic file promotion (pure functions against `mkstemp`-backed temp files).
+- **`pop3_client`** - full `USER`/`PASS`/`UIDL`/`QUIT`/`NOOP` exchanges against a threaded loopback mock server that listens on an ephemeral port.
+
+## Documentation
+
+```bash
+cmake --build build --target docs
+xdg-open docs/build/html/index.html
+```
+
+or run Doxygen directly:
+
+```bash
+doxygen docs/Doxyfile
+```
+
+## Project layout
 
 ```
 EmailNotifier/
-├── notifier.c      # Main loop: ncurses UI, 60s polling, POP3 session management
-├── notifier.h      # POP3 protocol: socket init, login, UIDL retrieval, UID comparison
-├── baza.uidl       # Persistent UID database (known message IDs)
-├── baza.uidlnew    # Temporary UID file (current poll, compared then promoted)
+├── CMakeLists.txt               # Build + test + docs targets
+├── include/
+│   ├── pop3_client.h            # Public POP3 client API
+│   └── uidl_store.h             # Public UIDL parse/diff/persist API
+├── src/
+│   ├── pop3_client.c            # POP3 protocol mechanics
+│   ├── uidl_store.c             # UIDL parsing and diff logic
+│   └── main.c                   # ncurses loop and 60s poll cadence
+├── tests/
+│   ├── test_pop3_client.cpp     # Integration tests with loopback mock server
+│   └── test_uidl_store.cpp      # Unit tests for parse / diff / promote
+├── docs/
+│   └── Doxyfile                 # Doxygen configuration
+├── .gitignore
 └── README.md
 ```
 
+Files written at runtime (gitignored):
+
+- `known_uids.txt` - persistent list of seen message UIDs.
+- `pending_uids.txt` - current poll's UIDL response, promoted atomically when new mail is detected.
+
+## Protocol flow
+
+1. `pop3_client_connect()` resolves the hostname and opens a TCP session, verifying the server greeting.
+2. `pop3_client_login()` sends `USER` and `PASS`, verifying a `+OK` on each.
+3. `pop3_client_fetch_uidl()` streams the UIDL response into a pending file via `uidl_store_extract_ids()`.
+4. `uidl_store_count_new()` diffs the pending file against the known-IDs file.
+5. If new IDs are found, `uidl_store_promote()` atomically renames the pending file over the known-IDs file (POSIX `rename` guarantee).
+6. `pop3_client_logout()` sends `QUIT`; `pop3_client_disconnect()` closes the socket.
+
 ## License
 
-This project is provided as-is for educational purposes.
+Provided as-is for educational use.
